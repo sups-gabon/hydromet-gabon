@@ -47,7 +47,48 @@ def load_gis():
     return data
 
 @st.cache_data(show_spinner=False)
-def load_releves():
+def load_unites():
+    """Charge ton fichier Unite (peu importe l'extension)"""
+    mapping = {}
+    candidates = [BASE/"Unite.csv", BASE/"Unite.txt", BASE/"Unite", BASE/"unite.csv", BASE/"Unites.csv", BASE/"Unite.xlsx"]
+    file_found = None
+    for f in candidates:
+        if f.exists():
+            file_found = f
+            break
+    
+    if not file_found:
+        return {}, None
+
+    try:
+        if file_found.suffix in [".xlsx", ".xls"]:
+            df_u = pd.read_excel(file_found, engine="openpyxl")
+        else:
+            # essaie ; puis , puis tab
+            try:
+                df_u = pd.read_csv(file_found, sep=';', encoding='utf-8-sig', engine='python')
+            except:
+                df_u = pd.read_csv(file_found, encoding='utf-8-sig', engine='python')
+        
+        df_u.columns = [c.lower().strip() for c in df_u.columns]
+        # Detecte colonnes parametre / unite
+        col_param = next((c for c in df_u.columns if "param" in c or "code" in c or "capteur" in c), df_u.columns[0])
+        col_unite = next((c for c in df_u.columns if "unit" in c or "unite" in c), df_u.columns[1] if len(df_u.columns)>1 else None)
+        
+        if col_unite:
+            for _, row in df_u.iterrows():
+                key = str(row[col_param]).strip().lower()
+                mapping[key] = str(row[col_unite]).strip()
+                # aussi mapping par code capteur si présent
+                mapping[str(row[col_param]).strip()] = str(row[col_unite]).strip()
+        
+        return mapping, file_found.name
+    except Exception as e:
+        st.warning(f"Fichier Unite trouvé mais illisible ({file_found.name}): {e}")
+        return {}, file_found.name
+
+@st.cache_data(show_spinner=False)
+def load_releves(unite_map):
     df = pd.read_csv(RELEVES, sep=';', encoding='utf-8-sig', engine='python')
     df.columns = [c.lower().strip() for c in df.columns]
     df["station"] = df["station"].astype(str).str.strip()
@@ -55,6 +96,19 @@ def load_releves():
     df["datetime"] = pd.to_datetime(df["date"].astype(str)+" "+df["heure"].astype(str), dayfirst=True, errors='coerce')
     df["valeur"] = pd.to_numeric(df["valeur"].astype(str).str.replace(',','.'), errors='coerce')
     df = df.dropna(subset=["datetime","valeur"])
+    
+    # Utilise le fichier Unite pour l'unité
+    def get_unite(row):
+        # cherche d'abord dans la colonne unite si elle existe dans Releves
+        if "unite" in df.columns and pd.notna(row.get("unite")) and str(row.get("unite")).strip() != "":
+            return str(row.get("unite"))
+        # sinon cherche dans le fichier Unite par parametre, par capteur, par code
+        for key in [str(row.get("parametre","")).lower(), str(row.get("parametre","")).strip(), str(row.get("capteur","")), str(row.get("capteur","")).lower()]:
+            if key in unite_map:
+                return unite_map[key]
+        return ""
+
+    df["unite_final"] = df.apply(get_unite, axis=1)
     return df
 
 def generate_map_image(gis, sel_station):
@@ -65,10 +119,9 @@ def generate_map_image(gis, sel_station):
     if "limite" in gis:
         gis["limite"].plot(ax=ax, facecolor="#e8f5e9", edgecolor="#1b5e20", linewidth=1.2, alpha=0.6, label="Limite Gabon")
     if "rivieres" in gis:
-        gis["rivieres"].plot(ax=ax, color="#1976d2", linewidth=0.8, alpha=0.7, label="Rivières")
+        gis["rivieres"].plot(ax=ax, color="#1976d2", linewidth=0.8, alpha=0.7, label="Rivières (Rivieres_Gabon)")
     
     if "stations" in gis and not gis["stations"].empty:
-        # Points
         for _, r in gis["stations"].iterrows():
             try:
                 lat, lon = r.geometry.y, r.geometry.x
@@ -77,25 +130,16 @@ def generate_map_image(gis, sel_station):
                     if "code" in str(c).lower() or "station" in str(c).lower():
                         code = str(r[c]); break
                 is_sel = (sel_station != "Toutes" and code == sel_station)
-                # Halo
                 if is_sel:
                     ax.scatter(lon, lat, s=800, c='#00b050', alpha=0.25, edgecolors='none', zorder=4)
-                    ax.scatter(lon, lat, s=300, c='#00b050', alpha=0.9, edgecolors='white', linewidth=1.5, zorder=5, label=f"Station sélectionnée: {STATIONS_NOMS.get(code, code)}")
+                    ax.scatter(lon, lat, s=300, c='#00b050', alpha=0.9, edgecolors='white', linewidth=1.5, zorder=5, label=f"Station sélectionnée")
                 else:
-                    ax.scatter(lon, lat, s=120, c='red', alpha=0.9, edgecolors='white', zorder=5)
+                    ax.scatter(lon, lat, s=120, c='red', alpha=0.9, edgecolors='white', zorder=5, label="Stations" if _ == 0 else "")
             except: pass
     
-    # Légende
     ax.legend(loc='lower left', fontsize=9, framealpha=0.9)
-    
-    # Flèche du Nord
     x0, y0 = 0.92, 0.88
-    ax.annotate('N', xy=(x0, y0), xytext=(x0, y0-0.06), xycoords='axes fraction',
-                ha='center', va='center', fontsize=14, fontweight='bold',
-                arrowprops=dict(facecolor='black', width=2, headwidth=10))
-    
-    # Echelle (approx)
-    # Barre 100km environ
+    ax.annotate('N', xy=(x0, y0), xytext=(x0, y0-0.06), xycoords='axes fraction', ha='center', va='center', fontsize=14, fontweight='bold', arrowprops=dict(facecolor='black', width=2, headwidth=10))
     if "limite" in gis:
         bounds = gis["limite"].total_bounds
         lon0 = bounds[0] + (bounds[2]-bounds[0])*0.05
@@ -104,9 +148,8 @@ def generate_map_image(gis, sel_station):
         ax.text(lon0+0.5, lat0+0.15, '100 km', ha='center', fontsize=9)
     
     ax.set_axis_off()
-    ax.set_title(f"Gabon - {sel_station} - {STATIONS_NOMS.get(sel_station, sel_station) if sel_station!='Toutes' else 'Toutes stations'}", fontsize=12, fontweight='bold', pad=15)
+    ax.set_title(f"Gabon - Limite / Rivières / Stations - {sel_station}", fontsize=11, fontweight='bold')
     plt.tight_layout()
-    
     buf = io.BytesIO()
     plt.savefig(buf, format='png', bbox_inches='tight', dpi=200)
     plt.close(fig)
@@ -114,9 +157,20 @@ def generate_map_image(gis, sel_station):
     return buf
 
 gis = load_gis()
-df = load_releves()
+unite_map, unite_file = load_unites()
 
-# --- FILTRES ---
+if not RELEVES.exists():
+    st.error("Releves.csv introuvable")
+    st.stop()
+
+df = load_releves(unite_map)
+
+# Debug Unite
+with st.expander(f"🔍 Fichier Unite détecté: {unite_file} - Mapping", expanded=False):
+    st.write(unite_map)
+    st.write("Exemple unités dans Releves:", df[["parametre","capteur","unite_final"]].drop_duplicates().head(10))
+
+# FILTRES
 col_f1, col_f2, col_f3 = st.columns(3)
 with col_f1:
     def fmt_station(code):
@@ -138,12 +192,13 @@ if sel_periode != "Toutes" and not df_f.empty:
     elif sel_periode == "30 jours": df_f = df_f[df_f["datetime"] >= last_date - timedelta(days=30)]
     elif sel_periode == "Année": df_f = df_f[df_f["datetime"] >= last_date - timedelta(days=365)]
 
-# --- CARTE + DASHBOARD ---
+# CARTE + DASHBOARD
 col_gauche, col_droite = st.columns([1.1, 1.4], gap="large")
 
 with col_gauche:
-    st.subheader("🗺️ Carte du Gabon")
+    st.subheader("🗺️ Limite_Gabon / Rivieres_Gabon / Stations")
     layers = []
+    # 1. Seulement Limite_Gabon + Rivieres + Stations
     if "limite" in gis:
         for geom in gis["limite"].geometry:
             if geom.geom_type == "Polygon":
@@ -172,57 +227,64 @@ with col_gauche:
         if pts_all:
             layers.append(pdk.Layer("ScatterplotLayer", data=pts_all, get_position='[lon, lat]', get_color='[255,0,0,200]', get_radius=6000, radius_min_pixels=5, pickable=True))
         if pts_sel:
-            # Halo
             layers.append(pdk.Layer("ScatterplotLayer", data=pts_sel, get_position='[lon, lat]', get_color='[0,176,80,60]', get_radius=25000, radius_min_pixels=25, pickable=False))
             layers.append(pdk.Layer("ScatterplotLayer", data=pts_sel, get_position='[lon, lat]', get_color='[0,176,80,255]', get_radius=9000, radius_min_pixels=9, pickable=True))
 
-    # MODIF 1: zoom 5.2 et pas de fond
-    view = pdk.ViewState(latitude=pts_sel[0]["lat"], longitude=pts_sel[0]["lon"], zoom=5.2) if pts_sel else pdk.ViewState(latitude=-0.8, longitude=11.8, zoom=5.2)
+    # Zoom initial sur les limites du Gabon
+    if "limite" in gis:
+        b = gis["limite"].total_bounds
+        lat_c = (b[1]+b[3])/2
+        lon_c = (b[0]+b[2])/2
+        zoom_init = 5.2
+        if pts_sel:
+            view = pdk.ViewState(latitude=pts_sel[0]["lat"], longitude=pts_sel[0]["lon"], zoom=5.2)
+        else:
+            view = pdk.ViewState(latitude=lat_c, longitude=lon_c, zoom=zoom_init)
+    else:
+        view = pdk.ViewState(latitude=-0.8, longitude=11.8, zoom=5.2)
+
     deck = pdk.Deck(layers=layers, initial_view_state=view, map_style=None, tooltip={"text": "{name}"})
     st.pydeck_chart(deck, height=520)
-    
-    # Bouton téléchargement carte avec légende
     map_img = generate_map_image(gis, sel_station)
-    st.download_button("📥 Télécharger la carte (PNG avec légende, Nord, échelle)", data=map_img, file_name=f"Carte_Gabon_{sel_station}.png", mime="image/png")
+    st.download_button("📥 Télécharger la carte (avec légende, Nord, échelle)", data=map_img, file_name=f"Carte_Gabon_{sel_station}.png", mime="image/png")
 
 with col_droite:
     st.subheader("📊 Tableau de bord")
     if df_f.empty:
-        st.warning("Pas de données pour cette sélection")
+        st.warning("Pas de données")
     else:
         df_f_sorted = df_f.sort_values("datetime")
         last_row = df_f_sorted.iloc[-1]
-        st.markdown(f'<div class="last-box"><div style="font-size:13px;opacity:0.9">Dernière mesure - {STATIONS_NOMS.get(str(last_row["station"]), last_row["station"])} / {last_row["parametre"]}</div><div style="font-size:28px;font-weight:800">{last_row["valeur"]}</div><div style="opacity:0.9">{last_row["date"]} {last_row["heure"]}</div></div>', unsafe_allow_html=True)
+        unite = last_row["unite_final"]
         
-        # MODIF 2: KPI sans nombre de mesures
+        st.markdown(f'<div class="last-box"><div style="font-size:13px;opacity:0.9">Dernière mesure - {STATIONS_NOMS.get(str(last_row["station"]), last_row["station"])} / {last_row["parametre"]}</div><div style="font-size:28px;font-weight:800">{last_row["valeur"]} {unite}</div><div style="opacity:0.9">{last_row["date"]} {last_row["heure"]}</div></div>', unsafe_allow_html=True)
+        
         v_min, v_max, v_moy = df_f["valeur"].min(), df_f["valeur"].max(), df_f["valeur"].mean()
         if "pluie" in sel_param.lower():
             k1, k2, k3, k4 = st.columns(4)
-            with k1: st.markdown(f'<div class="kpi-box"><div class="kpi-label">Min</div><div class="kpi-val">{v_min:.2f}</div></div>', unsafe_allow_html=True)
-            with k2: st.markdown(f'<div class="kpi-box"><div class="kpi-label">Max</div><div class="kpi-val">{v_max:.2f}</div></div>', unsafe_allow_html=True)
-            with k3: st.markdown(f'<div class="kpi-box"><div class="kpi-label">Moyenne</div><div class="kpi-val">{v_moy:.2f}</div></div>', unsafe_allow_html=True)
-            with k4: st.markdown(f'<div class="kpi-box"><div class="kpi-label">Total cumulé</div><div class="kpi-val">{df_f["valeur"].sum():.1f} mm</div></div>', unsafe_allow_html=True)
+            with k1: st.markdown(f'<div class="kpi-box"><div class="kpi-label">Min</div><div class="kpi-val">{v_min:.2f} {unite}</div></div>', unsafe_allow_html=True)
+            with k2: st.markdown(f'<div class="kpi-box"><div class="kpi-label">Max</div><div class="kpi-val">{v_max:.2f} {unite}</div></div>', unsafe_allow_html=True)
+            with k3: st.markdown(f'<div class="kpi-box"><div class="kpi-label">Moyenne</div><div class="kpi-val">{v_moy:.2f} {unite}</div></div>', unsafe_allow_html=True)
+            with k4: st.markdown(f'<div class="kpi-box"><div class="kpi-label">Total cumulé</div><div class="kpi-val">{df_f["valeur"].sum():.1f} {unite}</div></div>', unsafe_allow_html=True)
         else:
             k1, k2, k3 = st.columns(3)
-            with k1: st.markdown(f'<div class="kpi-box"><div class="kpi-label">Min</div><div class="kpi-val">{v_min:.2f}</div></div>', unsafe_allow_html=True)
-            with k2: st.markdown(f'<div class="kpi-box"><div class="kpi-label">Max</div><div class="kpi-val">{v_max:.2f}</div></div>', unsafe_allow_html=True)
-            with k3: st.markdown(f'<div class="kpi-box"><div class="kpi-label">Moyenne</div><div class="kpi-val">{v_moy:.2f}</div></div>', unsafe_allow_html=True)
+            with k1: st.markdown(f'<div class="kpi-box"><div class="kpi-label">Min</div><div class="kpi-val">{v_min:.2f} {unite}</div></div>', unsafe_allow_html=True)
+            with k2: st.markdown(f'<div class="kpi-box"><div class="kpi-label">Max</div><div class="kpi-val">{v_max:.2f} {unite}</div></div>', unsafe_allow_html=True)
+            with k3: st.markdown(f'<div class="kpi-box"><div class="kpi-label">Moyenne</div><div class="kpi-val">{v_moy:.2f} {unite}</div></div>', unsafe_allow_html=True)
 
-        fig = px.line(df_f_sorted, x="datetime", y="valeur", title=f"{sel_param} - {sel_station}")
-        fig.update_layout(height=380, margin=dict(l=10,r=10,t=40,b=10))
+        # MODIF 3: Axes = Nom paramètre + unité / Période
+        y_label = f"{sel_param} ({unite})" if unite else sel_param
+        fig = px.line(df_f_sorted, x="datetime", y="valeur", title=f"{y_label} - {sel_station}")
+        fig.update_layout(xaxis_title="Période", yaxis_title=y_label, height=380, margin=dict(l=10,r=10,t=40,b=10))
         st.plotly_chart(fig, use_container_width=True)
         try:
             st.download_button("📥 Télécharger le graphe PNG", data=fig.to_image(format="png", scale=2), file_name=f"{sel_station}_{sel_param}.png", mime="image/png", key="graph_png")
         except: pass
 
-# --- MODIF 3: Tableau 10 dernières valeurs ---
 st.divider()
 st.subheader("📋 10 dernières valeurs - Releves.csv")
 if not df_f.empty:
     df_last10 = df_f.sort_values("datetime", ascending=False).head(10)
-    # Affiche seulement colonnes utiles
-    cols_show = [c for c in ["station","nom_station","parametre","date","heure","valeur","capteur"] if c in df_last10.columns]
-    st.dataframe(df_last10[cols_show], use_container_width=True, hide_index=True)
-else:
-    # Si filtre vide, montre les 10 dernières globales
-    st.dataframe(df.sort_values("datetime", ascending=False).head(10), use_container_width=True, hide_index=True)
+    cols_show = [c for c in ["station","parametre","date","heure","valeur","unite_final","capteur"] if c in df_last10.columns]
+    df_last10 = df_last10[cols_show].rename(columns={"unite_final":"unité"})
+    st.dataframe(df_last10, use_container_width=True, hide_index=True)
