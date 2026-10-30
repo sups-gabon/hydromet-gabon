@@ -6,3 +6,4 @@ plotly
 pyogrio
 kaleido
 matplotlib
+openpyxl
