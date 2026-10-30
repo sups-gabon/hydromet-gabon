@@ -8,3 +8,4 @@ pyproj
 pyogrio
 openpyxl
 streamlit-autorefresh
+matplotlib
