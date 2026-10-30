@@ -5,3 +5,4 @@ pydeck
 plotly
 pyogrio
 kaleido
+matplotlib
