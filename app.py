@@ -12,13 +12,20 @@ st.set_page_config(page_title="Hydrométrie du Gabon - DGE", layout="wide")
 
 st.markdown("""
 <style>
-.last-box {background:linear-gradient(135deg,#00b050 0%,#007a33 100%); color:white; border-radius:14px; padding:18px 22px; margin-bottom:14px}
+.last-box {
+    background:linear-gradient(135deg,#00b050 0%,#007a33 100%); 
+    color:white; border-radius:14px; padding:18px 22px; margin-bottom:14px;
+    display:flex; justify-content:space-between; align-items:center;
+}
+.last-left {flex:1}
+.last-right {text-align:right; margin-left:20px}
 .kpi-box {background:#f8f9fa; border:1px solid #e9ecef; border-radius:12px; padding:14px; text-align:center}
 .kpi-val {font-size:22px; font-weight:700; color:#007a33}
 .kpi-label {font-size:13px; color:#666}
-.var-up {background:#dcfce7; color:#166534; border-radius:20px; padding:5px 12px; font-size:13px; font-weight:600; margin-top:10px; display:inline-block; border:1px solid #86efac}
-.var-down {background:#fee2e2; color:#991b1b; border-radius:20px; padding:5px 12px; font-size:13px; font-weight:600; margin-top:10px; display:inline-block; border:1px solid #fca5a5}
-.var-stable {background:#e5e7eb; color:#1f2937; border-radius:20px; padding:5px 12px; font-size:13px; font-weight:600; margin-top:10px; display:inline-block; border:1px solid #d1d5db}
+.var-up-big {background:#dcfce7; color:#166534; border-radius:12px; padding:12px 16px; font-size:16px; font-weight:800; border:2px solid #86efac; display:inline-block; text-align:center; min-width:160px}
+.var-down-big {background:#fee2e2; color:#991b1b; border-radius:12px; padding:12px 16px; font-size:16px; font-weight:800; border:2px solid #fca5a5; display:inline-block; text-align:center; min-width:160px}
+.var-stable-big {background:#ffffff; color:#111827; border-radius:12px; padding:12px 16px; font-size:16px; font-weight:800; border:2px solid #ffffff; display:inline-block; text-align:center; min-width:160px}
+.var-sub {font-size:11px; font-weight:500; opacity:0.8; display:block; margin-top:4px}
 </style>
 """, unsafe_allow_html=True)
 
@@ -195,26 +202,29 @@ with col_droite:
         last_row = df_f_sorted.iloc[-1]
         unite = last_row["unite_final"]
         
-        # VARIATION EN COULEUR
         var_html = ""
         if len(df_f_sorted) >= 2:
             prev_row = df_f_sorted.iloc[-2]
             delta = last_row["valeur"] - prev_row["valeur"]
             if abs(delta) < 0.001:
-                var_html = f'<div class="var-stable">→ Stable — même valeur à {prev_row["heure"]} le {prev_row["date"]}</div>'
+                var_html = f'<div class="var-stable-big">→ 0.00 {unite}<span class="var-sub">Stable vs {prev_row["heure"]}<br>{prev_row["valeur"]:.2f} {unite}</span></div>'
             elif delta > 0:
-                var_html = f'<div class="var-up">↗ En hausse de +{delta:.2f} {unite} — précédent: {prev_row["valeur"]:.2f} {unite} à {prev_row["heure"]} le {prev_row["date"]}</div>'
+                var_html = f'<div class="var-up-big">↗ +{delta:.2f} {unite}<span class="var-sub">Hausse vs {prev_row["heure"]}<br>{prev_row["valeur"]:.2f} {unite}</span></div>'
             else:
-                var_html = f'<div class="var-down">↘ En baisse de {delta:.2f} {unite} — précédent: {prev_row["valeur"]:.2f} {unite} à {prev_row["heure"]} le {prev_row["date"]}</div>'
+                var_html = f'<div class="var-down-big">↘ {delta:.2f} {unite}<span class="var-sub">Baisse vs {prev_row["heure"]}<br>{prev_row["valeur"]:.2f} {unite}</span></div>'
         else:
-            var_html = '<div class="var-stable">Première valeur enregistrée</div>'
+            var_html = '<div class="var-stable-big">1ère valeur</div>'
 
         st.markdown(f'''
         <div class="last-box">
-            <div style="font-size:13px;opacity:0.9">Dernière mesure - {STATIONS_NOMS.get(str(last_row["station"]), last_row["station"])} / {last_row["parametre"]}</div>
-            <div style="font-size:28px;font-weight:800">{last_row["valeur"]} {unite}</div>
-            <div style="opacity:0.9">{last_row["date"]} {last_row["heure"]}</div>
-            {var_html}
+            <div class="last-left">
+                <div style="font-size:13px;opacity:0.9">Dernière mesure - {STATIONS_NOMS.get(str(last_row["station"]), last_row["station"])} / {last_row["parametre"]}</div>
+                <div style="font-size:32px;font-weight:800">{last_row["valeur"]} {unite}</div>
+                <div style="opacity:0.9">{last_row["date"]} {last_row["heure"]}</div>
+            </div>
+            <div class="last-right">
+                {var_html}
+            </div>
         </div>
         ''', unsafe_allow_html=True)
         
