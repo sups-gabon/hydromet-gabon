@@ -47,7 +47,6 @@ def load_gis():
         gdf = gpd.read_file(BASE / "Rivieres_Gabon.shp", engine="pyogrio")
         if gdf.crs: gdf = gdf.to_crs(4326)
         gdf.columns = [c.lower() for c in gdf.columns]
-        gdf["geometry"] = gdf.geometry.simplify(0.01, preserve_topology=True)
         data["rivieres"] = gdf
     if (BASE / "Stations.shp").exists():
         gdf = gpd.read_file(BASE / "Stations.shp", engine="pyogrio")
@@ -102,8 +101,8 @@ def load_releves(unite_map):
 def generate_map_image(gis, sel_station):
     fig, ax = plt.subplots(figsize=(8, 8), dpi=200)
     fig.patch.set_facecolor('white'); ax.set_facecolor('white')
-    if "limite" in gis: gis["limite"].plot(ax=ax, facecolor="#e8f5e9", edgecolor="#1b5e20", linewidth=1.2, alpha=0.6, label="Limite_Gabon")
-    if "rivieres" in gis: gis["rivieres"].plot(ax=ax, color="#1976d2", linewidth=0.8, alpha=0.7, label="Rivieres_Gabon")
+    if "limite" in gis: gis["limite"].plot(ax=ax, facecolor="#d3d3d3", edgecolor="#1b5e20", linewidth=1.2, alpha=0.35, label="Limite_Gabon")
+    if "rivieres" in gis: gis["rivieres"].plot(ax=ax, color="#1e78ff", linewidth=0.9, alpha=0.9, label="Rivieres_Gabon")
     if "stations" in gis and not gis["stations"].empty:
         for _, r in gis["stations"].iterrows():
             try:
@@ -162,12 +161,22 @@ with col_gauche:
     layers = []
     if "limite" in gis:
         for geom in gis["limite"].geometry:
-            if geom.geom_type == "Polygon": layers.append(pdk.Layer("PolygonLayer", data=[{"poly": [list(geom.exterior.coords)]}], get_polygon="poly", get_fill_color=[232,245,233,255], get_line_color=[27,94,32,255], line_width_min_pixels=2))
+            if geom.geom_type == "Polygon":
+                layers.append(pdk.Layer("PolygonLayer", data=[{"poly": [list(geom.exterior.coords)]}], get_polygon="poly", get_fill_color=[180,180,180,40], get_line_color=[27,94,32,255], line_width_min_pixels=2.5))
             elif geom.geom_type == "MultiPolygon":
-                for g in geom.geoms: layers.append(pdk.Layer("PolygonLayer", data=[{"poly": [list(g.exterior.coords)]}], get_polygon="poly", get_fill_color=[232,245,233,255], get_line_color=[27,94,32,255], line_width_min_pixels=2))
-    if "rivieres" in gis:
-        lines = [{"path": list(g.coords)} for g in gis["rivieres"].geometry if g.geom_type=="LineString"]
-        if lines: layers.append(pdk.Layer("PathLayer", data=lines, get_path="path", get_color=[25,118,210,160], width_min_pixels=1.5))
+                for g in geom.geoms:
+                    layers.append(pdk.Layer("PolygonLayer", data=[{"poly": [list(g.exterior.coords)]}], get_polygon="poly", get_fill_color=[180,180,180,40], get_line_color=[27,94,32,255], line_width_min_pixels=2.5))
+    if "rivieres" in gis and not gis["rivieres"].empty:
+        riviere_paths = []
+        for geom in gis["rivieres"].geometry:
+            if geom is None: continue
+            if geom.geom_type == "LineString":
+                riviere_paths.append({"path": list(geom.coords)})
+            elif geom.geom_type == "MultiLineString":
+                for line in geom.geoms:
+                    riviere_paths.append({"path": list(line.coords)})
+        if riviere_paths:
+            layers.append(pdk.Layer("PathLayer", data=riviere_paths, get_path="path", get_color=[30,120,255,220], width_min_pixels=2.5, width_max_pixels=5, joint_rounded=True))
     pts_all, pts_sel = [], []
     if "stations" in gis:
         for _, r in gis["stations"].iterrows():
@@ -180,14 +189,14 @@ with col_gauche:
                 if sel_station != "Toutes" and code == sel_station: pts_sel.append(item)
                 else: pts_all.append(item)
             except: pass
-        if pts_all: layers.append(pdk.Layer("ScatterplotLayer", data=pts_all, get_position='[lon, lat]', get_color='[255,0,0,200]', get_radius=6000, radius_min_pixels=5, pickable=True))
+        if pts_all: layers.append(pdk.Layer("ScatterplotLayer", data=pts_all, get_position='[lon, lat]', get_color='[255,0,0,230]', get_radius=7000, radius_min_pixels=6, pickable=True))
         if pts_sel:
-            layers.append(pdk.Layer("ScatterplotLayer", data=pts_sel, get_position='[lon, lat]', get_color='[0,176,80,60]', get_radius=25000, radius_min_pixels=25, pickable=False))
-            layers.append(pdk.Layer("ScatterplotLayer", data=pts_sel, get_position='[lon, lat]', get_color='[0,176,80,255]', get_radius=9000, radius_min_pixels=9, pickable=True))
+            layers.append(pdk.Layer("ScatterplotLayer", data=pts_sel, get_position='[lon, lat]', get_color='[0,176,80,50]', get_radius=30000, radius_min_pixels=28, pickable=False))
+            layers.append(pdk.Layer("ScatterplotLayer", data=pts_sel, get_position='[lon, lat]', get_color='[0,176,80,255]', get_radius=10000, radius_min_pixels=10, pickable=True))
     if "limite" in gis:
         b = gis["limite"].total_bounds
         lat_c, lon_c = (b[1]+b[3])/2, (b[0]+b[2])/2
-        view = pdk.ViewState(latitude=pts_sel[0]["lat"], longitude=pts_sel[0]["lon"], zoom=5.2) if pts_sel else pdk.ViewState(latitude=lat_c, longitude=lon_c, zoom=5.2)
+        view = pdk.ViewState(latitude=pts_sel[0]["lat"], longitude=pts_sel[0]["lon"], zoom=6) if pts_sel else pdk.ViewState(latitude=lat_c, longitude=lon_c, zoom=5.4)
     else: view = pdk.ViewState(latitude=-0.8, longitude=11.8, zoom=5.2)
     deck = pdk.Deck(layers=layers, initial_view_state=view, map_style=None, tooltip={"text": "{name}"})
     st.pydeck_chart(deck, height=520)
@@ -201,7 +210,6 @@ with col_droite:
         df_f_sorted = df_f.sort_values("datetime")
         last_row = df_f_sorted.iloc[-1]
         unite = last_row["unite_final"]
-        
         var_html = ""
         if len(df_f_sorted) >= 2:
             prev_row = df_f_sorted.iloc[-2]
@@ -214,7 +222,6 @@ with col_droite:
                 var_html = f'<div class="var-down-big">↘ {delta:.2f} {unite}<span class="var-sub">Baisse vs {prev_row["heure"]}<br>{prev_row["valeur"]:.2f} {unite}</span></div>'
         else:
             var_html = '<div class="var-stable-big">1ère valeur</div>'
-
         st.markdown(f'''
         <div class="last-box">
             <div class="last-left">
@@ -222,12 +229,9 @@ with col_droite:
                 <div style="font-size:32px;font-weight:800">{last_row["valeur"]} {unite}</div>
                 <div style="opacity:0.9">{last_row["date"]} {last_row["heure"]}</div>
             </div>
-            <div class="last-right">
-                {var_html}
-            </div>
+            <div class="last-right">{var_html}</div>
         </div>
         ''', unsafe_allow_html=True)
-        
         v_min, v_max, v_moy = df_f["valeur"].min(), df_f["valeur"].max(), df_f["valeur"].mean()
         if "pluie" in sel_param.lower():
             k1, k2, k3, k4 = st.columns(4)
@@ -240,7 +244,6 @@ with col_droite:
             with k1: st.markdown(f'<div class="kpi-box"><div class="kpi-label">Min</div><div class="kpi-val">{v_min:.2f} {unite}</div></div>', unsafe_allow_html=True)
             with k2: st.markdown(f'<div class="kpi-box"><div class="kpi-label">Max</div><div class="kpi-val">{v_max:.2f} {unite}</div></div>', unsafe_allow_html=True)
             with k3: st.markdown(f'<div class="kpi-box"><div class="kpi-label">Moyenne</div><div class="kpi-val">{v_moy:.2f} {unite}</div></div>', unsafe_allow_html=True)
-
         y_label = f"{sel_param} ({unite})" if unite else sel_param
         fig = px.line(df_f_sorted, x="datetime", y="valeur", title=f"{y_label} - {sel_station}")
         fig.update_layout(xaxis_title="Période", yaxis_title=y_label, height=380, margin=dict(l=10,r=10,t=40,b=10))
