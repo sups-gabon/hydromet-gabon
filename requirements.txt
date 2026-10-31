@@ -7,3 +7,4 @@ pyogrio
 kaleido
 matplotlib
 openpyxl
+streamlit-autorefresh
