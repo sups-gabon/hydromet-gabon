@@ -12,7 +12,7 @@ ensure_pkg("streamlit-autorefresh", "streamlit_autorefresh")
 ensure_pkg("pyogrio")
 
 import pandas as pd
-import os, re, csv, shutil, unicodedata, tempfile, time
+import os, re, csv, shutil, tempfile, time
 from pathlib import Path
 from ftplib import FTP
 from datetime import datetime, timedelta
@@ -70,7 +70,6 @@ st.markdown("""
   [data-testid="column"]{width:100% !important; flex:1 1 100% !important}
   [data-testid="stHorizontalBlock"]{flex-wrap:wrap !important}
 }
-/* Impression */
 @media print {
   header, footer, [data-testid="stSidebar"], [data-testid="stHeader"] { display:none !important; }
   .main, .block-container { padding:0 !important; margin:0 !important; max-width:100% !important; }
@@ -79,7 +78,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-def nom_fichier_sur(t): return re.sub(r"\W+", "_", t, flags=re.UNICODE).strip("_")
 def ecrire_csv(dest, lignes):
     dest.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(suffix=".csv", dir=str(dest.parent)); os.close(fd)
@@ -148,18 +146,13 @@ def get_last_datetime():
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_ftp_file_list():
     try:
-        ftp = FTP()
-        ftp.connect(FTP_HOST, FTP_PORT, timeout=10)
-        ftp.login(FTP_USER, FTP_PASS)
-        ftp.set_pasv(True)
+        ftp = FTP(); ftp.connect(FTP_HOST, FTP_PORT, timeout=10); ftp.login(FTP_USER, FTP_PASS); ftp.set_pasv(True)
         all_files=[]
         for dossier in FTP_DOSSIERS:
             try:
-                ftp.cwd(f"/{dossier}")
-                files=ftp.nlst()
+                ftp.cwd(f"/{dossier}"); files=ftp.nlst()
                 for f in files:
-                    if f.lower().endswith(".mis"):
-                        all_files.append((f"/{dossier}", f))
+                    if f.lower().endswith(".mis"): all_files.append((f"/{dossier}", f))
             except: continue
         ftp.quit()
         uniques={Path(f).name:(d,f) for d,f in all_files}
@@ -169,16 +162,14 @@ def get_ftp_file_list():
 def sync_ftp_and_convert():
     if "last_sync_ts" in st.session_state:
         if (time.time() - st.session_state.last_sync_ts) < 3600 and RELEVES_FINAL.exists():
-            try: _, exist = lire_csv_existant(RELEVES_FINAL); return len(exist), 0, True
-            except: return 0,0,True
+            _, exist = lire_csv_existant(RELEVES_FINAL); return len(exist), 0, True
     DOSSIER_ENTREE.mkdir(exist_ok=True)
     local_files = set(p.name for p in DOSSIER_ENTREE.glob("*.mis")) | set(p.name for p in DOSSIER_ENTREE.glob("*.MIS"))
     last_dt = get_last_datetime()
     if last_dt and pd.notna(last_dt):
         if (datetime.now() - last_dt.to_pydatetime()).total_seconds()/60 < 60:
             st.session_state.last_sync_ts = time.time()
-            try: _, exist = lire_csv_existant(RELEVES_FINAL); return len(exist), 0, True
-            except: return 0,0,True
+            _, exist = lire_csv_existant(RELEVES_FINAL); return len(exist), 0, True
     all_mis = get_ftp_file_list()
     if not all_mis:
         st.session_state.last_sync_ts = time.time()
@@ -218,7 +209,6 @@ def sync_ftp_and_convert():
     else:
         tous=trier_sans_doublons(tous); ecrire_csv(RELEVES_FINAL, tous); st.session_state.last_sync_ts=time.time(); return len(tous), len(to_download_names), False
 
-# APP
 st.title("Hydrométrie du Gabon : DGE")
 bar=st.progress(0); txt=st.empty()
 txt.text("🔄 Vérification rapide..."); bar.progress(0.3)
@@ -267,7 +257,8 @@ with c1:
     sel_station=st.selectbox("📍 Station", ["Toutes"]+sorted(df["station"].unique().tolist()), format_func=fmt_st)
 with c2:
     params=sorted(df["parametre"].dropna().unique().tolist()) if "parametre" in df.columns else sorted(df["capteur"].map(CAPTEURS).unique().tolist())
-    sel_param=st.selectbox("📈 Paramètre", params)
+    default_idx = params.index("Niveau d'eau") if "Niveau d'eau" in params else 0
+    sel_param=st.selectbox("📈 Paramètre", params, index=default_idx)
 with c3:
     sel_periode=st.selectbox("🗓️ Période", ["Toutes","7 jours","30 jours","Année"], index=0)
 
@@ -359,10 +350,9 @@ st.subheader("📋 Dernières valeurs")
 if not df_f.empty:
     st.dataframe(df_f.sort_values("datetime", ascending=False).head(10), use_container_width=True, height=350)
 
-# --- IMPRESSION PAYSAGE A4 / A3 ---
 st.divider()
 st.subheader("🖨️ Imprimer en paysage")
-st.caption("Choisis le format, l'aperçu s'ouvre en paysage. Coche 'Arrière-plans graphiques' pour garder les couleurs.")
+st.caption("Paysage uniquement - Coche 'Arrière-plans graphiques' pour garder les couleurs.")
 
 components.html("""
 <style>
@@ -386,7 +376,6 @@ function printPage(size){
       [data-testid="stSidebar"], [data-testid="stHeader"], header, footer { display:none !important; }
       .print-wrap, button { display:none !important; }
       .block-container { padding-top:0 !important; max-width:100% !important; }
-      [data-testid="stDeckGlJsonChart"] { height: 520px !important; }
     }
   `;
   setTimeout(()=>{ window.parent.print(); }, 250);
