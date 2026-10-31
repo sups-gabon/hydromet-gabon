@@ -12,15 +12,14 @@ ensure_pkg("streamlit-autorefresh", "streamlit_autorefresh")
 ensure_pkg("pyogrio")
 
 import pandas as pd
-import os, re, csv, shutil, unicodedata, tempfile, time, io
+import os, re, csv, shutil, unicodedata, tempfile, time
 from pathlib import Path
 from ftplib import FTP
-from collections import defaultdict
 from datetime import datetime, timedelta
-
 import geopandas as gpd
 import pydeck as pdk
 import plotly.express as px
+import streamlit.components.v1 as components
 
 try:
     from streamlit_autorefresh import st_autorefresh
@@ -29,7 +28,6 @@ except:
     HAS_AUTO = False
 
 st.set_page_config(page_title="Hydrométrie du Gabon - DGE", layout="wide")
-
 if HAS_AUTO:
     st_autorefresh(interval=3600000, key="hourly_sync")
 
@@ -42,7 +40,6 @@ FTP_DOSSIERS = ["Donnees_Hydro", "FOUGAMOU"]
 BASE = Path(__file__).parent
 DOSSIER_ENTREE = BASE / "DonneesEntrees"
 DOSSIER_SORTIE = BASE / "DonneesCSV"
-DOSSIER_STATION = DOSSIER_SORTIE / "Combine_Station"
 RELEVES_FINAL = BASE / "Releves.csv"
 
 STATIONS_NOMS = {"1141902405":"Mandilou Aviation","1141900112":"Saint-Martin"}
@@ -55,40 +52,29 @@ ENTETE_CSV = ["station","nom_station","capteur","parametre","date","heure","vale
 FORMAT_DATE_SORTIE = "%d/%m/%Y"
 FORMAT_HEURE_SORTIE = "%H:%M:%S"
 
-# --- CSS RESPONSIVE MOBILE / TABLETTE ---
 st.markdown("""
 <style>
-/* Base desktop */
 .last-box {background:linear-gradient(135deg,#00b050 0%,#007a33 100%); color:white; border-radius:14px; padding:18px 22px; margin-bottom:14px; display:flex; justify-content:space-between; align-items:center; gap:12px}
-.last-left{flex:1}
-.last-right{text-align:right; margin-left:20px}
+.last-left{flex:1} .last-right{text-align:right; margin-left:20px}
 .kpi-box{background:#f8f9fa; border:1px solid #e9ecef; border-radius:12px; padding:14px; text-align:center}
-.kpi-val{font-size:22px; font-weight:700; color:#007a33}
-.kpi-label{font-size:13px; color:#666}
+.kpi-val{font-size:22px; font-weight:700; color:#007a33} .kpi-label{font-size:13px; color:#666}
 .var-up-big{background:#dcfce7; color:#166534; border-radius:12px; padding:12px 16px; font-size:16px; font-weight:800; border:2px solid #86efac; display:inline-block; min-width:160px; text-align:center}
 .var-down-big{background:#fee2e2; color:#991b1b; border-radius:12px; padding:12px 16px; font-size:16px; font-weight:800; border:2px solid #fca5a5; display:inline-block; min-width:160px; text-align:center}
 .var-stable-big{background:#ffffff; color:#111827; border-radius:12px; padding:12px 16px; font-size:16px; font-weight:800; border:2px solid #fff; display:inline-block; min-width:160px; text-align:center}
 .var-sub{font-size:11px; font-weight:500; opacity:0.8; display:block; margin-top:4px}
-
-/* Tablet < 1024px */
-@media (max-width: 1024px){
-  .last-box{padding:14px 16px}
-  .kpi-val{font-size:19px}
-}
-
-/* Mobile < 768px */
 @media (max-width: 768px){
-  h1{font-size:22px !important; line-height:1.2}
-  .last-box{flex-direction:column; align-items:stretch; text-align:left}
+  h1{font-size:22px !important}
+  .last-box{flex-direction:column; align-items:stretch}
   .last-right{margin-left:0; text-align:center; margin-top:10px}
   .last-right div{width:100% !important; min-width:unset !important}
-  .kpi-box{padding:10px}
-  .kpi-val{font-size:17px}
-  /* Streamlit columns deviennent 100% */
   [data-testid="column"]{width:100% !important; flex:1 1 100% !important}
   [data-testid="stHorizontalBlock"]{flex-wrap:wrap !important}
-  /* Select plus gros doigt */
-  .stSelectbox div[data-baseweb="select"]{min-height:44px}
+}
+/* Impression */
+@media print {
+  header, footer, [data-testid="stSidebar"], [data-testid="stHeader"] { display:none !important; }
+  .main, .block-container { padding:0 !important; margin:0 !important; max-width:100% !important; }
+  body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
 </style>
 """, unsafe_allow_html=True)
@@ -155,7 +141,6 @@ def get_last_datetime():
         if not RELEVES_FINAL.exists(): return None
         df=pd.read_csv(RELEVES_FINAL, sep=';', encoding='utf-8-sig', nrows=5000)
         df.columns=[c.lower().strip() for c in df.columns]
-        if "date" not in df.columns or "heure" not in df.columns: return None
         df["dt"]=pd.to_datetime(df["date"].astype(str)+" "+df["heure"].astype(str), dayfirst=True, errors='coerce')
         return df["dt"].max()
     except: return None
@@ -179,8 +164,7 @@ def get_ftp_file_list():
         ftp.quit()
         uniques={Path(f).name:(d,f) for d,f in all_files}
         return list(uniques.values())
-    except:
-        return []
+    except: return []
 
 def sync_ftp_and_convert():
     if "last_sync_ts" in st.session_state:
@@ -208,18 +192,13 @@ def sync_ftp_and_convert():
         st.session_state.last_sync_ts = time.time()
         _, exist = lire_csv_existant(RELEVES_FINAL); return len(exist), 0, True
     try:
-        ftp = FTP()
-        ftp.connect(FTP_HOST, FTP_PORT, timeout=15)
-        ftp.login(FTP_USER, FTP_PASS)
-        ftp.set_pasv(True)
+        ftp = FTP(); ftp.connect(FTP_HOST, FTP_PORT, timeout=15); ftp.login(FTP_USER, FTP_PASS); ftp.set_pasv(True)
         cur_dir=None
         for fname in to_download_names:
             dossier = name_to_dossier[fname]
             try:
-                if cur_dir != dossier:
-                    ftp.cwd(dossier); cur_dir=dossier
-                with open(DOSSIER_ENTREE/fname, 'wb') as lf:
-                    ftp.retrbinary(f"RETR {fname}", lf.write, blocksize=65536)
+                if cur_dir != dossier: ftp.cwd(dossier); cur_dir=dossier
+                with open(DOSSIER_ENTREE/fname, 'wb') as lf: ftp.retrbinary(f"RETR {fname}", lf.write, blocksize=65536)
             except: continue
         ftp.quit()
     except: pass
@@ -228,32 +207,21 @@ def sync_ftp_and_convert():
         src=DOSSIER_ENTREE/fname
         if not src.exists(): continue
         try:
-            mes=lire_mis(src)
-            ecrire_csv(DOSSIER_SORTIE/(src.stem+".csv"), mes)
-            tous.extend(mes)
+            mes=lire_mis(src); ecrire_csv(DOSSIER_SORTIE/(src.stem+".csv"), mes); tous.extend(mes)
         except: pass
     if RELEVES_FINAL.exists() and tous:
         _, exist = lire_csv_existant(RELEVES_FINAL)
-        fusion=trier_sans_doublons(exist+tous)
-        ecrire_csv(RELEVES_FINAL, fusion)
-        st.session_state.last_sync_ts=time.time()
-        return len(fusion), len(to_download_names), False
+        fusion=trier_sans_doublons(exist+tous); ecrire_csv(RELEVES_FINAL, fusion)
+        st.session_state.last_sync_ts=time.time(); return len(fusion), len(to_download_names), False
     elif RELEVES_FINAL.exists():
-        _, exist = lire_csv_existant(RELEVES_FINAL)
-        st.session_state.last_sync_ts=time.time()
-        return len(exist), 0, True
+        _, exist = lire_csv_existant(RELEVES_FINAL); st.session_state.last_sync_ts=time.time(); return len(exist), 0, True
     else:
-        tous=trier_sans_doublons(tous)
-        ecrire_csv(RELEVES_FINAL, tous)
-        st.session_state.last_sync_ts=time.time()
-        return len(tous), len(to_download_names), False
+        tous=trier_sans_doublons(tous); ecrire_csv(RELEVES_FINAL, tous); st.session_state.last_sync_ts=time.time(); return len(tous), len(to_download_names), False
 
-# ================== APP ==================
+# APP
 st.title("Hydrométrie du Gabon : DGE")
-
 bar=st.progress(0); txt=st.empty()
-txt.text("🔄 Vérification rapide...")
-bar.progress(0.3)
+txt.text("🔄 Vérification rapide..."); bar.progress(0.3)
 try:
     nb_lignes, nb_new, deja_ajour = sync_ftp_and_convert()
     bar.progress(1.0)
@@ -268,16 +236,13 @@ def load_gis():
     data={}
     if (BASE/"Limite_Gabon.shp").exists():
         gdf=gpd.read_file(BASE/"Limite_Gabon.shp", engine="pyogrio")
-        if gdf.crs: gdf=gdf.to_crs(4326)
-        gdf.columns=[c.lower() for c in gdf.columns]; data["limite"]=gdf
+        if gdf.crs: gdf=gdf.to_crs(4326); gdf.columns=[c.lower() for c in gdf.columns]; data["limite"]=gdf
     if (BASE/"Rivieres_Gabon.shp").exists():
         gdf=gpd.read_file(BASE/"Rivieres_Gabon.shp", engine="pyogrio")
-        if gdf.crs: gdf=gdf.to_crs(4326)
-        gdf.columns=[c.lower() for c in gdf.columns]; data["rivieres"]=gdf
+        if gdf.crs: gdf=gdf.to_crs(4326); gdf.columns=[c.lower() for c in gdf.columns]; data["rivieres"]=gdf
     if (BASE/"Stations.shp").exists():
         gdf=gpd.read_file(BASE/"Stations.shp", engine="pyogrio")
-        if gdf.crs: gdf=gdf.to_crs(4326)
-        gdf.columns=[c.lower() for c in gdf.columns]; data["stations"]=gdf
+        if gdf.crs: gdf=gdf.to_crs(4326); gdf.columns=[c.lower() for c in gdf.columns]; data["stations"]=gdf
     return data
 
 @st.cache_data(show_spinner=False)
@@ -296,7 +261,6 @@ gis=load_gis()
 try: df=load_releves_df()
 except: st.error("Aucun Releves.csv trouvé"); st.stop()
 
-# Filtres - sur mobile ils se stack automatiquement grâce au CSS
 c1,c2,c3=st.columns(3)
 with c1:
     def fmt_st(code): return "🌍 Toutes" if code=="Toutes" else f"{code} - {STATIONS_NOMS.get(code,code)}"
@@ -317,11 +281,7 @@ if sel_periode!="Toutes" and not df_f.empty:
     elif sel_periode=="30 jours": df_f=df_f[df_f["datetime"]>=last-timedelta(days=30)]
     elif sel_periode=="Année": df_f=df_f[df_f["datetime"]>=last-timedelta(days=365)]
 
-# Layout responsive: sur mobile, une seule colonne
-is_mobile = st.session_state.get("is_mobile", False)
-# On utilise 2 colonnes mais le CSS les fait passer en 100% sur mobile
 col_gauche, col_droite = st.columns([1.1,1.4], gap="medium")
-
 with col_gauche:
     st.subheader("🗺️ Carte")
     layers=[]
@@ -359,7 +319,6 @@ with col_gauche:
         view=pdk.ViewState(latitude=pts_sel[0]["lat"], longitude=pts_sel[0]["lon"], zoom=6) if pts_sel else pdk.ViewState(latitude=lat_c, longitude=lon_c, zoom=5.2)
     else: view=pdk.ViewState(latitude=-0.8, longitude=11.8, zoom=5.2)
     deck=pdk.Deck(layers=layers, initial_view_state=view, map_style=None, tooltip={"text":"{name}"})
-    # hauteur adaptative : 380px sur mobile, 520 desktop via CSS
     st.pydeck_chart(deck, height=420)
 
 with col_droite:
@@ -399,3 +358,38 @@ st.divider()
 st.subheader("📋 Dernières valeurs")
 if not df_f.empty:
     st.dataframe(df_f.sort_values("datetime", ascending=False).head(10), use_container_width=True, height=350)
+
+# --- IMPRESSION PAYSAGE A4 / A3 ---
+st.divider()
+st.subheader("🖨️ Imprimer en paysage")
+st.caption("Choisis le format, l'aperçu s'ouvre en paysage. Coche 'Arrière-plans graphiques' pour garder les couleurs.")
+
+components.html("""
+<style>
+  .print-wrap{display:flex; gap:12px; justify-content:center; flex-wrap:wrap; margin:10px 0 20px 0}
+  .pbtn{border:none; padding:14px 22px; border-radius:12px; font-weight:800; cursor:pointer; color:white; font-size:15px; min-width:180px}
+  .p-a4{background:linear-gradient(135deg,#00b050,#007a33)}
+  .p-a3{background:linear-gradient(135deg,#2563eb,#1e40af)}
+  @media(max-width:768px){ .pbtn{width:100%} }
+</style>
+<div class="print-wrap">
+  <button class="pbtn p-a4" onclick="printPage('A4 landscape')">🖨️ Imprimer A4 Paysage</button>
+  <button class="pbtn p-a3" onclick="printPage('A3 landscape')">🖨️ Imprimer A3 Paysage</button>
+</div>
+<script>
+function printPage(size){
+  let style = document.getElementById('print-style');
+  if(!style){ style=document.createElement('style'); style.id='print-style'; document.head.appendChild(style); }
+  style.innerHTML = `
+    @page { size: ${size}; margin: 10mm; }
+    @media print {
+      [data-testid="stSidebar"], [data-testid="stHeader"], header, footer { display:none !important; }
+      .print-wrap, button { display:none !important; }
+      .block-container { padding-top:0 !important; max-width:100% !important; }
+      [data-testid="stDeckGlJsonChart"] { height: 520px !important; }
+    }
+  `;
+  setTimeout(()=>{ window.parent.print(); }, 250);
+}
+</script>
+""", height=90)
