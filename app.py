@@ -30,11 +30,9 @@ except:
 
 st.set_page_config(page_title="Hydrométrie du Gabon - DGE", layout="wide")
 
-# --- AUTO REFRESH 1H ---
 if HAS_AUTO:
     st_autorefresh(interval=3600000, key="hourly_sync")
 
-# --- CONFIG FTP - utilise st.secrets sur Streamlit Cloud ---
 FTP_HOST = st.secrets.get("FTP_HOST", "ftp.sommeupservices.ga")
 FTP_PORT = int(st.secrets.get("FTP_PORT", 21))
 FTP_USER = st.secrets.get("FTP_USER", "2312136aE79X7")
@@ -57,18 +55,41 @@ ENTETE_CSV = ["station","nom_station","capteur","parametre","date","heure","vale
 FORMAT_DATE_SORTIE = "%d/%m/%Y"
 FORMAT_HEURE_SORTIE = "%H:%M:%S"
 
-# --- CSS avec variation à droite VERTE / ROUGE / BLANCHE ---
+# --- CSS RESPONSIVE MOBILE / TABLETTE ---
 st.markdown("""
 <style>
-.last-box {background:linear-gradient(135deg,#00b050 0%,#007a33 100%); color:white; border-radius:14px; padding:18px 22px; margin-bottom:14px; display:flex; justify-content:space-between; align-items:center}
+/* Base desktop */
+.last-box {background:linear-gradient(135deg,#00b050 0%,#007a33 100%); color:white; border-radius:14px; padding:18px 22px; margin-bottom:14px; display:flex; justify-content:space-between; align-items:center; gap:12px}
 .last-left{flex:1}
 .last-right{text-align:right; margin-left:20px}
 .kpi-box{background:#f8f9fa; border:1px solid #e9ecef; border-radius:12px; padding:14px; text-align:center}
 .kpi-val{font-size:22px; font-weight:700; color:#007a33}
+.kpi-label{font-size:13px; color:#666}
 .var-up-big{background:#dcfce7; color:#166534; border-radius:12px; padding:12px 16px; font-size:16px; font-weight:800; border:2px solid #86efac; display:inline-block; min-width:160px; text-align:center}
 .var-down-big{background:#fee2e2; color:#991b1b; border-radius:12px; padding:12px 16px; font-size:16px; font-weight:800; border:2px solid #fca5a5; display:inline-block; min-width:160px; text-align:center}
 .var-stable-big{background:#ffffff; color:#111827; border-radius:12px; padding:12px 16px; font-size:16px; font-weight:800; border:2px solid #fff; display:inline-block; min-width:160px; text-align:center}
 .var-sub{font-size:11px; font-weight:500; opacity:0.8; display:block; margin-top:4px}
+
+/* Tablet < 1024px */
+@media (max-width: 1024px){
+  .last-box{padding:14px 16px}
+  .kpi-val{font-size:19px}
+}
+
+/* Mobile < 768px */
+@media (max-width: 768px){
+  h1{font-size:22px !important; line-height:1.2}
+  .last-box{flex-direction:column; align-items:stretch; text-align:left}
+  .last-right{margin-left:0; text-align:center; margin-top:10px}
+  .last-right div{width:100% !important; min-width:unset !important}
+  .kpi-box{padding:10px}
+  .kpi-val{font-size:17px}
+  /* Streamlit columns deviennent 100% */
+  [data-testid="column"]{width:100% !important; flex:1 1 100% !important}
+  [data-testid="stHorizontalBlock"]{flex-wrap:wrap !important}
+  /* Select plus gros doigt */
+  .stSelectbox div[data-baseweb="select"]{min-height:44px}
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -83,13 +104,11 @@ def ecrire_csv(dest, lignes):
         shutil.move(tmp, dest)
     finally:
         if os.path.exists(tmp): os.unlink(tmp)
-
 def lire_texte(path):
     for enc in ("utf-8-sig","cp1252","latin-1"):
         try: return path.read_text(encoding=enc)
         except: continue
     return path.read_text(encoding="utf-8", errors="replace")
-
 def format_python(f): return f.upper().replace("YYYY","%Y").replace("YY","%y").replace("MM","%m").replace("DD","%d")
 def formater_date_heure(d,h,fd):
     try: d=datetime.strptime(d, format_python(fd)).strftime(FORMAT_DATE_SORTIE)
@@ -98,7 +117,6 @@ def formater_date_heure(d,h,fd):
         try: h=datetime.strptime(h.strip(), fmt).strftime(FORMAT_HEURE_SORTIE); break
         except: continue
     return d,h
-
 def lire_mis(chemin):
     lignes=[]; station=capteur=""; fmt_date="YYYYMMDD"
     for ligne in lire_texte(chemin).splitlines():
@@ -116,7 +134,6 @@ def lire_mis(chemin):
         dt,ht=formater_date_heure(date,heure,fmt_date)
         lignes.append([station, STATIONS_NOMS.get(station,station), capteur, CAPTEURS.get(capteur,capteur), dt, ht, valeur, code])
     return lignes
-
 def trier_sans_doublons(lignes):
     vues,res=set(),[]
     def cle(l):
@@ -129,118 +146,136 @@ def trier_sans_doublons(lignes):
         sig=tuple(ligne)
         if sig not in vues: vues.add(sig); res.append(ligne)
     return res
-
 def lire_csv_existant(p):
     with open(p, newline="", encoding="utf-8-sig") as f:
         ll=list(csv.reader(f, delimiter=";"))
         return ll[0] if ll else [], ll[1:] if len(ll)>1 else []
-
 def get_last_datetime():
     try:
         if not RELEVES_FINAL.exists(): return None
-        df=pd.read_csv(RELEVES_FINAL, sep=';', encoding='utf-8-sig')
+        df=pd.read_csv(RELEVES_FINAL, sep=';', encoding='utf-8-sig', nrows=5000)
         df.columns=[c.lower().strip() for c in df.columns]
+        if "date" not in df.columns or "heure" not in df.columns: return None
         df["dt"]=pd.to_datetime(df["date"].astype(str)+" "+df["heure"].astype(str), dayfirst=True, errors='coerce')
         return df["dt"].max()
     except: return None
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_ftp_file_list():
+    try:
+        ftp = FTP()
+        ftp.connect(FTP_HOST, FTP_PORT, timeout=10)
+        ftp.login(FTP_USER, FTP_PASS)
+        ftp.set_pasv(True)
+        all_files=[]
+        for dossier in FTP_DOSSIERS:
+            try:
+                ftp.cwd(f"/{dossier}")
+                files=ftp.nlst()
+                for f in files:
+                    if f.lower().endswith(".mis"):
+                        all_files.append((f"/{dossier}", f))
+            except: continue
+        ftp.quit()
+        uniques={Path(f).name:(d,f) for d,f in all_files}
+        return list(uniques.values())
+    except:
+        return []
+
 def sync_ftp_and_convert():
-    DOSSIER_ENTREE.mkdir(exist_ok=True); DOSSIER_SORTIE.mkdir(exist_ok=True)
-    last_dt=get_last_datetime()
+    if "last_sync_ts" in st.session_state:
+        if (time.time() - st.session_state.last_sync_ts) < 3600 and RELEVES_FINAL.exists():
+            try: _, exist = lire_csv_existant(RELEVES_FINAL); return len(exist), 0, True
+            except: return 0,0,True
+    DOSSIER_ENTREE.mkdir(exist_ok=True)
+    local_files = set(p.name for p in DOSSIER_ENTREE.glob("*.mis")) | set(p.name for p in DOSSIER_ENTREE.glob("*.MIS"))
+    last_dt = get_last_datetime()
     if last_dt and pd.notna(last_dt):
         if (datetime.now() - last_dt.to_pydatetime()).total_seconds()/60 < 60:
-            return 0,0,True
-
-    def get_ftp():
-        ftp=FTP(); ftp.connect(FTP_HOST, FTP_PORT, timeout=30)
-        ftp.login(FTP_USER, FTP_PASS); ftp.set_pasv(True); return ftp
-
-    ftp=get_ftp()
-    all_mis=[]
-    for dossier in FTP_DOSSIERS:
-        try:
-            ftp.cwd(f"/{dossier}"); files=[f for f in ftp.nlst() if f.lower().endswith(".mis")]
-            for f in files: all_mis.append((f"/{dossier}", f))
-        except:
-            try: ftp.cwd(dossier); files=[f for f in ftp.nlst() if f.lower().endswith(".mis")]; all_mis.extend([(dossier,f) for f in files])
+            st.session_state.last_sync_ts = time.time()
+            try: _, exist = lire_csv_existant(RELEVES_FINAL); return len(exist), 0, True
+            except: return 0,0,True
+    all_mis = get_ftp_file_list()
+    if not all_mis:
+        st.session_state.last_sync_ts = time.time()
+        if RELEVES_FINAL.exists():
+            _, exist = lire_csv_existant(RELEVES_FINAL); return len(exist), 0, True
+        return 0,0,True
+    remote_names = {Path(f).name for _, f in all_mis}
+    to_download_names = remote_names - local_files
+    name_to_dossier = {Path(f).name:d for d,f in all_mis}
+    if not to_download_names:
+        st.session_state.last_sync_ts = time.time()
+        _, exist = lire_csv_existant(RELEVES_FINAL); return len(exist), 0, True
+    try:
+        ftp = FTP()
+        ftp.connect(FTP_HOST, FTP_PORT, timeout=15)
+        ftp.login(FTP_USER, FTP_PASS)
+        ftp.set_pasv(True)
+        cur_dir=None
+        for fname in to_download_names:
+            dossier = name_to_dossier[fname]
+            try:
+                if cur_dir != dossier:
+                    ftp.cwd(dossier); cur_dir=dossier
+                with open(DOSSIER_ENTREE/fname, 'wb') as lf:
+                    ftp.retrbinary(f"RETR {fname}", lf.write, blocksize=65536)
             except: continue
-
-    uniques={Path(f).name:(d,f) for d,f in all_mis}
-    all_mis=list(uniques.values())
-    
-    to_download=[]
-    for d,fname in all_mis:
-        lp=DOSSIER_ENTREE/Path(fname).name
-        if not lp.exists() or lp.stat().st_size<100: to_download.append((d,fname))
-
-    for d,fname in to_download:
-        try:
-            ftp.cwd(d)
-            with open(DOSSIER_ENTREE/Path(fname).name, 'wb') as lf: ftp.retrbinary(f"RETR {fname}", lf.write, blocksize=32768)
-        except:
-            try: ftp=get_ftp(); ftp.cwd(d); 
-            except: continue
-            with open(DOSSIER_ENTREE/Path(fname).name, 'wb') as lf: ftp.retrbinary(f"RETR {fname}", lf.write, blocksize=32768)
-    try: ftp.quit()
+        ftp.quit()
     except: pass
-
-    fichiers_a_parser = [DOSSIER_ENTREE/Path(f).name for _,f in to_download] if to_download else ([] if RELEVES_FINAL.exists() else list(DOSSIER_ENTREE.glob("*.mis")) + list(DOSSIER_ENTREE.glob("*.MIS")))
-    
     tous=[]
-    par=defaultdict(list)
-    for src in fichiers_a_parser:
+    for fname in to_download_names:
+        src=DOSSIER_ENTREE/fname
+        if not src.exists(): continue
         try:
             mes=lire_mis(src)
             ecrire_csv(DOSSIER_SORTIE/(src.stem+".csv"), mes)
             tous.extend(mes)
-            for l in mes: par[(l[0],l[2])].append(l)
         except: pass
-
-    for (stn, cap), mes in par.items():
-        ecrire_csv(DOSSIER_STATION/f"{stn}_{nom_fichier_sur(STATIONS_NOMS.get(stn,stn))}"/f"{cap}_{nom_fichier_sur(CAPTEURS.get(cap,cap))}.csv", trier_sans_doublons(mes))
-
     if RELEVES_FINAL.exists() and tous:
-        _, exist=lire_csv_existant(RELEVES_FINAL)
+        _, exist = lire_csv_existant(RELEVES_FINAL)
         fusion=trier_sans_doublons(exist+tous)
         ecrire_csv(RELEVES_FINAL, fusion)
-        return len(fusion), len(to_download), False
+        st.session_state.last_sync_ts=time.time()
+        return len(fusion), len(to_download_names), False
     elif RELEVES_FINAL.exists():
-        _, exist=lire_csv_existant(RELEVES_FINAL)
+        _, exist = lire_csv_existant(RELEVES_FINAL)
+        st.session_state.last_sync_ts=time.time()
         return len(exist), 0, True
     else:
         tous=trier_sans_doublons(tous)
         ecrire_csv(RELEVES_FINAL, tous)
-        return len(tous), len(to_download), False
+        st.session_state.last_sync_ts=time.time()
+        return len(tous), len(to_download_names), False
 
-# ================== SYNC AU DEMARRAGE ==================
-st.title("Hydrométrie du Gabon : Direction Générale de l'Eau")
+# ================== APP ==================
+st.title("Hydrométrie du Gabon : DGE")
 
 bar=st.progress(0); txt=st.empty()
-txt.text("🔄 Synchronisation FTP au démarrage...")
-bar.progress(0.2)
+txt.text("🔄 Vérification rapide...")
+bar.progress(0.3)
 try:
     nb_lignes, nb_new, deja_ajour = sync_ftp_and_convert()
     bar.progress(1.0)
-    if deja_ajour: txt.success(f"✅ Données à jour : {nb_lignes} mesures - Prochaine sync auto dans 1h")
-    else: txt.success(f"✅ Sync FTP : {nb_new} nouveaux fichiers -> {nb_lignes} mesures totales")
-    time.sleep(1.5); txt.empty(); bar.empty()
+    if deja_ajour: txt.success(f"✅ À jour : {nb_lignes} mesures")
+    else: txt.success(f"✅ Sync : +{nb_new} fichiers -> {nb_lignes} mesures")
+    time.sleep(1); txt.empty(); bar.empty()
 except Exception as e:
-    bar.empty(); txt.warning(f"Mode hors-ligne (FTP non joignable) : {e}"); time.sleep(2); txt.empty()
+    bar.empty(); txt.warning(f"Hors-ligne : {e}"); time.sleep(2); txt.empty()
 
-# ================== CHARGEMENT GIS CORRIGE ==================
 @st.cache_data(show_spinner=False)
 def load_gis():
-    data={}; base=Path(__file__).parent
-    if (base/"Limite_Gabon.shp").exists():
-        gdf=gpd.read_file(base/"Limite_Gabon.shp", engine="pyogrio")
+    data={}
+    if (BASE/"Limite_Gabon.shp").exists():
+        gdf=gpd.read_file(BASE/"Limite_Gabon.shp", engine="pyogrio")
         if gdf.crs: gdf=gdf.to_crs(4326)
         gdf.columns=[c.lower() for c in gdf.columns]; data["limite"]=gdf
-    if (base/"Rivieres_Gabon.shp").exists():
-        gdf=gpd.read_file(base/"Rivieres_Gabon.shp", engine="pyogrio")
+    if (BASE/"Rivieres_Gabon.shp").exists():
+        gdf=gpd.read_file(BASE/"Rivieres_Gabon.shp", engine="pyogrio")
         if gdf.crs: gdf=gdf.to_crs(4326)
         gdf.columns=[c.lower() for c in gdf.columns]; data["rivieres"]=gdf
-    if (base/"Stations.shp").exists():
-        gdf=gpd.read_file(base/"Stations.shp", engine="pyogrio")
+    if (BASE/"Stations.shp").exists():
+        gdf=gpd.read_file(BASE/"Stations.shp", engine="pyogrio")
         if gdf.crs: gdf=gdf.to_crs(4326)
         gdf.columns=[c.lower() for c in gdf.columns]; data["stations"]=gdf
     return data
@@ -261,10 +296,10 @@ gis=load_gis()
 try: df=load_releves_df()
 except: st.error("Aucun Releves.csv trouvé"); st.stop()
 
-# ================== FILTRES ==================
+# Filtres - sur mobile ils se stack automatiquement grâce au CSS
 c1,c2,c3=st.columns(3)
 with c1:
-    def fmt_st(code): return "🌍 Toutes les stations" if code=="Toutes" else f"{code} - {STATIONS_NOMS.get(code,code)}"
+    def fmt_st(code): return "🌍 Toutes" if code=="Toutes" else f"{code} - {STATIONS_NOMS.get(code,code)}"
     sel_station=st.selectbox("📍 Station", ["Toutes"]+sorted(df["station"].unique().tolist()), format_func=fmt_st)
 with c2:
     params=sorted(df["parametre"].dropna().unique().tolist()) if "parametre" in df.columns else sorted(df["capteur"].map(CAPTEURS).unique().tolist())
@@ -282,11 +317,13 @@ if sel_periode!="Toutes" and not df_f.empty:
     elif sel_periode=="30 jours": df_f=df_f[df_f["datetime"]>=last-timedelta(days=30)]
     elif sel_periode=="Année": df_f=df_f[df_f["datetime"]>=last-timedelta(days=365)]
 
-# ================== CARTE + DASHBOARD ==================
-col_gauche, col_droite = st.columns([1.1,1.4], gap="large")
+# Layout responsive: sur mobile, une seule colonne
+is_mobile = st.session_state.get("is_mobile", False)
+# On utilise 2 colonnes mais le CSS les fait passer en 100% sur mobile
+col_gauche, col_droite = st.columns([1.1,1.4], gap="medium")
 
 with col_gauche:
-    st.subheader("🗺️ Carte du Gabon")
+    st.subheader("🗺️ Carte")
     layers=[]
     if "limite" in gis:
         for geom in gis["limite"].geometry:
@@ -319,10 +356,11 @@ with col_gauche:
             layers.append(pdk.Layer("ScatterplotLayer", data=pts_sel, get_position='[lon, lat]', get_color='[0,176,80,255]', get_radius=10000, radius_min_pixels=10, pickable=True))
     if "limite" in gis:
         b=gis["limite"].total_bounds; lat_c,lon_c=(b[1]+b[3])/2,(b[0]+b[2])/2
-        view=pdk.ViewState(latitude=pts_sel[0]["lat"], longitude=pts_sel[0]["lon"], zoom=6) if pts_sel else pdk.ViewState(latitude=lat_c, longitude=lon_c, zoom=5.4)
+        view=pdk.ViewState(latitude=pts_sel[0]["lat"], longitude=pts_sel[0]["lon"], zoom=6) if pts_sel else pdk.ViewState(latitude=lat_c, longitude=lon_c, zoom=5.2)
     else: view=pdk.ViewState(latitude=-0.8, longitude=11.8, zoom=5.2)
     deck=pdk.Deck(layers=layers, initial_view_state=view, map_style=None, tooltip={"text":"{name}"})
-    st.pydeck_chart(deck, height=520)
+    # hauteur adaptative : 380px sur mobile, 520 desktop via CSS
+    st.pydeck_chart(deck, height=420)
 
 with col_droite:
     st.subheader("📊 Tableau de bord")
@@ -338,26 +376,26 @@ with col_droite:
             else: var_html=f'<div class="var-down-big">↘ {delta:.2f} {unite}<span class="var-sub">Baisse vs {prev["heure"]}<br>{prev["valeur"]:.2f} {unite}</span></div>'
         else: var_html='<div class="var-stable-big">1ère valeur</div>'
         st.markdown(f'''
-        <div class="last-box"><div class="last-left"><div style="font-size:13px;opacity:0.9">Dernière mesure - {STATIONS_NOMS.get(str(last_row["station"]), last_row["station"])} / {last_row["parametre"] if "parametre" in last_row else CAPTEURS.get(last_row["capteur"],"")}</div>
-        <div style="font-size:32px;font-weight:800">{last_row["valeur"]} {unite}</div><div style="opacity:0.9">{last_row["date"]} {last_row["heure"]}</div></div>
+        <div class="last-box"><div class="last-left"><div style="font-size:13px;opacity:0.9">Dernière - {STATIONS_NOMS.get(str(last_row["station"]), last_row["station"])} / {last_row["parametre"] if "parametre" in last_row else CAPTEURS.get(last_row["capteur"],"")}</div>
+        <div style="font-size:28px;font-weight:800">{last_row["valeur"]} {unite}</div><div style="opacity:0.9">{last_row["date"]} {last_row["heure"]}</div></div>
         <div class="last-right">{var_html}</div></div>''', unsafe_allow_html=True)
         vmin,vmax,vmoy=df_f["valeur"].min(), df_f["valeur"].max(), df_f["valeur"].mean()
         if last_row["capteur"]=="0002":
             k1,k2,k3,k4=st.columns(4)
-            with k1: st.markdown(f'<div class="kpi-box"><div class="kpi-label">Min</div><div class="kpi-val">{vmin:.2f} {unite}</div></div>', unsafe_allow_html=True)
-            with k2: st.markdown(f'<div class="kpi-box"><div class="kpi-label">Max</div><div class="kpi-val">{vmax:.2f} {unite}</div></div>', unsafe_allow_html=True)
-            with k3: st.markdown(f'<div class="kpi-box"><div class="kpi-label">Moyenne</div><div class="kpi-val">{vmoy:.2f} {unite}</div></div>', unsafe_allow_html=True)
-            with k4: st.markdown(f'<div class="kpi-box"><div class="kpi-label">Total cumulé</div><div class="kpi-val">{df_f["valeur"].sum():.1f} {unite}</div></div>', unsafe_allow_html=True)
+            with k1: st.markdown(f'<div class="kpi-box"><div class="kpi-label">Min</div><div class="kpi-val">{vmin:.2f}</div></div>', unsafe_allow_html=True)
+            with k2: st.markdown(f'<div class="kpi-box"><div class="kpi-label">Max</div><div class="kpi-val">{vmax:.2f}</div></div>', unsafe_allow_html=True)
+            with k3: st.markdown(f'<div class="kpi-box"><div class="kpi-label">Moy</div><div class="kpi-val">{vmoy:.2f}</div></div>', unsafe_allow_html=True)
+            with k4: st.markdown(f'<div class="kpi-box"><div class="kpi-label">Total</div><div class="kpi-val">{df_f["valeur"].sum():.1f}</div></div>', unsafe_allow_html=True)
         else:
             k1,k2,k3=st.columns(3)
             with k1: st.markdown(f'<div class="kpi-box"><div class="kpi-label">Min</div><div class="kpi-val">{vmin:.2f} {unite}</div></div>', unsafe_allow_html=True)
             with k2: st.markdown(f'<div class="kpi-box"><div class="kpi-label">Max</div><div class="kpi-val">{vmax:.2f} {unite}</div></div>', unsafe_allow_html=True)
-            with k3: st.markdown(f'<div class="kpi-box"><div class="kpi-label">Moyenne</div><div class="kpi-val">{vmoy:.2f} {unite}</div></div>', unsafe_allow_html=True)
-        fig=px.line(df_s, x="datetime", y="valeur", title=f"{sel_param} ({unite}) - {sel_station}")
-        fig.update_layout(xaxis_title="Période", yaxis_title=f"{sel_param} ({unite})", height=380)
+            with k3: st.markdown(f'<div class="kpi-box"><div class="kpi-label">Moy</div><div class="kpi-val">{vmoy:.2f} {unite}</div></div>', unsafe_allow_html=True)
+        fig=px.line(df_s, x="datetime", y="valeur")
+        fig.update_layout(xaxis_title="Période", yaxis_title=f"{sel_param} ({unite})", height=340, margin=dict(l=10,r=10,t=20,b=10))
         st.plotly_chart(fig, use_container_width=True)
 
 st.divider()
-st.subheader("📋 10 dernières valeurs")
+st.subheader("📋 Dernières valeurs")
 if not df_f.empty:
-    st.dataframe(df_f.sort_values("datetime", ascending=False).head(10), use_container_width=True)
+    st.dataframe(df_f.sort_values("datetime", ascending=False).head(10), use_container_width=True, height=350)
